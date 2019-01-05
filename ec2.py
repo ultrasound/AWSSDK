@@ -1,113 +1,117 @@
 import datetime
 import json
-import time
 
 import boto3
 from botocore.exceptions import ClientError
 
 ec2 = boto3.client('ec2', region_name='ap-northeast-2')
 
-all_instances = ec2.describe_instances()
 
-instanceId_list = []
-for reservation in all_instances["Reservations"]:
-    instance_id = reservation.get('Instances')[0].get('InstanceId')
-    instanceId_list.append(instance_id)
+def datetime_to_str(data):
+    if isinstance(data, datetime.datetime):
+        return data.__str__()
 
 
-def datetime_to_str(object):
-    if isinstance(object, datetime.datetime):
-        return object.__str__()
+class Ec2Operation:
+    def __init__(self):
+        self._instance_ids = ''
 
+    @property
+    def instance_ids(self):
+        return self._instance_ids
 
-def desc_instances(ins_id=[], save_to_file=False):
-    if len(ins_id) > 0:
-        res = ec2.describe_instances(InstanceIds=ins_id)
-        print(json.dumps(res, default=datetime_to_str, indent=4))
-        if save_to_file:
-            json.dump(res, open(ins_id[0] + ".json", 'w'), default=datetime_to_str, indent=4)
-    else:
-        res = ec2.describe_instances()
-        print(json.dumps(res, default=datetime_to_str, indent=4))
-        if save_to_file:
-            json.dump(res, open("all_instances.json", 'w'), default=datetime_to_str, indent=4)
-        return res
+    @instance_ids.setter
+    def instance_ids(self, instance_ids):
+        self._instance_ids = instance_ids
 
+    def start_instances(self):
+        try:
+            ec2.start_instances(InstanceIds=[self._instance_ids], DryRun=True)
+        except ClientError as e:
+            if 'DryRunOperation' not in str(e):
+                raise
 
-def start_instances(ins_id=[]):
-    try:
-        ec2.start_instances(InstanceIds=ins_id, DryRun=True)
-    except ClientError as e:
-        if 'DryRunOperation' not in str(e):
-            raise
+        # Dry run succeeded, run start_instances without dryrun
+        try:
+            ec2.start_instances(InstanceIds=[self._instance_ids], DryRun=False)
+            print("Instance ", self._instance_ids, ": starting\n")
+            waiter = ec2.get_waiter('instance_running')
+            waiter.wait(InstanceIds=[self._instance_ids])
+            print("Instance ", self._instance_ids, ": running\n")
+        except ClientError as e:
+            print(e)
 
-    # Dry run succeeded, run start_instances without dryrun
-    try:
-        ec2.start_instances(InstanceIds=ins_id, DryRun=False)
-        print("Instance ", ins_id[0], ": starting\n")
-        waiter = ec2.get_waiter('instance_running')
-        waiter.wait(InstanceIds=ins_id)
-        print("Instance ", ins_id[0], ": running\n")
-    except ClientError as e:
-        print(e)
+    def stop_instances(self):
+        # Do a dryrun first to verify permissions
+        try:
+            ec2.stop_instances(InstanceIds=[self._instance_ids], DryRun=True)
+        except ClientError as e:
+            if 'DryRunOperation' not in str(e):
+                raise
 
+        # Dry run succeeded, call stop_instances without dryrun
+        try:
+            ec2.stop_instances(InstanceIds=self._instance_ids, DryRun=False)
+            print("Instance ", self.instance_ids, ": stopping")
+            waiter = ec2.get_waiter('instance_stopped')
+            waiter.wait(InstanceIds=self.instance_ids)
+            print("Instance ", self.instance_ids, ": stopped\n")
+        except ClientError as e:
+            print(e)
 
-def stop_instances(ins_id=[]):
-    # Do a dryrun first to verify permissions
-    try:
-        ec2.stop_instances(InstanceIds=ins_id, DryRun=True)
-    except ClientError as e:
-        if 'DryRunOperation' not in str(e):
-            raise
+    def reboot_instances(self):
+        try:
+            ec2.reboot_instances(InstanceIds=[self.instance_ids], DryRun=True)
+        except ClientError as e:
+            if 'DryRunOperation' not in str(e):
+                print("You don't have permission to reboot instances.")
+                raise
 
-    # Dry run succeeded, call stop_instances without dryrun
-    try:
-        ec2.stop_instances(InstanceIds=ins_id, DryRun=False)
-        print("Instance ", ins_id[0], ": stopping")
-        waiter = ec2.get_waiter('instance_stopped')
-        waiter.wait(InstanceIds=ins_id)
-        print("Instance ", ins_id[0], ": stopped\n")
-    except ClientError as e:
-        print(e)
+        try:
+            ec2.reboot_instances(InstanceIds=[self.instance_ids], DryRun=False)
+            print("Instance ", self.instance_ids, ": rebooting")
+            waiter = ec2.get_waiter('instance_status_ok')
+            waiter.wait(InstanceIds=[self.instance_ids])
+            print("Instance ", self.instance_ids, ": running\n")
+        except ClientError as e:
+            print('Error', e)
 
+    def desc_instances(self, save_to_file=False, all_instance=False):
+        if all_instance:
+            res = ec2.describe_instances()
+            print(json.dumps(res, default=datetime_to_str, indent=4))
+            if save_to_file:
+                json.dump(res, open("all_instances.json", 'w'), default=datetime_to_str, indent=4)
+            return res
+        else:
+            res = ec2.describe_instances(InstanceIds=[self.instance_ids])
+            print(json.dumps(res, default=datetime_to_str, indent=4))
+            if save_to_file:
+                json.dump(res, open(self.instance_ids + ".json", 'w'), default=datetime_to_str, indent=4)
 
-def reboot_instances(ins_id=[]):
-    try:
-        ec2.reboot_instances(InstanceIds=ins_id, DryRun=True)
-    except ClientError as e:
-        if 'DryRunOperation' not in str(e):
-            print("You don't have permission to reboot instances.")
-            raise
+    def instance_status(self):
+        try:
+            response = ec2.describe_instances(InstanceIds=[self.instance_ids])
+            status = response.get('Reservations')[0].get('Instances')[0].get('State').get('Name')
+            print("Instance ", self.instance_ids, ": ", status)
+            print("")
+        except ClientError as e:
+            print(e)
 
-    try:
-        ec2.reboot_instances(InstanceIds=ins_id, DryRun=False)
-        print("Instance ", ins_id[0], ": rebooting")
-        waiter = ec2.get_waiter('instance_status_ok')
-        waiter.wait(InstanceIds=ins_id)
-        print("Instance ", ins_id[0], ": running\n")
-    except ClientError as e:
-        print('Error', e)
-
-
-def instance_status(ins_id=[]):
-    try:
-        response = ec2.describe_instances(InstanceIds=ins_id)
-        status = response.get('Reservations')[0].get('Instances')[0].get('State').get('Name')
-        print("Instance ", ins_id[0], ": ", status)
-        print("")
-    except ClientError as e:
-        print(e)
-
-
-def launch_instance(ami_id, instance_type, key_name, tag=''):
-    pass
-
-
-def describe_images(ExecutableUsers=[], Filters=[]):
-    response = ec2.describe_images(ExecutableUsers=ExecutableUsers, Filters=Filters)
+    def run_instance(self):
+        pass
 
 
 if __name__ == '__main__':
+    all_instances = ec2.describe_instances()
+
+    instanceId_list = []
+    for reservation in all_instances["Reservations"]:
+        instance_id = reservation.get('Instances')[0].get('InstanceId')
+        instanceId_list.append(instance_id)
+
+    ec2_ = Ec2Operation()
+
     while True:
         print("Instances List")
 
@@ -135,7 +139,8 @@ if __name__ == '__main__':
             try:
                 selected_instance = input("Instance ID to stop: ")
                 print("")
-                stop_instances(ins_id=[instanceId_list[int(selected_instance) - 1], ])
+                ec2_.instance_ids = instanceId_list[int(selected_instance) - 1]
+                ec2_.stop_instances()
             except IndexError:
                 print("Wrong Number\n")
                 continue
@@ -143,7 +148,8 @@ if __name__ == '__main__':
             try:
                 selected_instance = input("Instance ID to start: ")
                 print("")
-                start_instances(ins_id=[instanceId_list[int(selected_instance) - 1], ])
+                ec2_.instance_ids = instanceId_list[int(selected_instance) - 1]
+                ec2_.start_instances()
             except IndexError:
                 print("Wrong Number\n")
                 continue
@@ -151,7 +157,8 @@ if __name__ == '__main__':
             try:
                 selected_instance = input("Instance ID to reboot: ")
                 print("")
-                reboot_instances(ins_id=[instanceId_list[int(selected_instance) - 1], ])
+                ec2_.instance_ids = instanceId_list[int(selected_instance) - 1]
+                ec2_.reboot_instances()
             except IndexError:
                 print("Wrong Number\n")
                 continue
@@ -171,20 +178,23 @@ if __name__ == '__main__':
                 break
 
             if all_.upper() == "Y" and save_.upper() == "Y":
-                desc_instances(save_to_file=True)
+                ec2_.desc_instances(all_instance=True, save_to_file=True)
             elif all_.upper() == "Y" and save_.upper() == "N":
-                desc_instances()
+                ec2_.desc_instances(all_instance=True)
             else:
                 selected_instance = input("Instance Id to describe: ")
                 if save_.upper() == "Y":
-                    desc_instances(ins_id=[instanceId_list[int(selected_instance) - 1], ], save_to_file=True)
+                    ec2_.instance_ids = instanceId_list[int(selected_instance) - 1]
+                    ec2_.desc_instances(save_to_file=True)
                 else:
-                    desc_instances(ins_id=[instanceId_list[int(selected_instance) - 1], ])
+                    ec2_.instance_ids = instanceId_list[int(selected_instance) - 1]
+                    ec2_.desc_instances()
         elif command == '5':
             try:
                 selected_instance = input("Instance ID to check status: ")
                 print("")
-                instance_status(ins_id=[instanceId_list[int(selected_instance) - 1], ])
+                ec2_.instance_ids = instanceId_list[int(selected_instance) - 1]
+                ec2_.instance_status()
             except IndexError:
                 print("Wrong Number\n")
                 continue
