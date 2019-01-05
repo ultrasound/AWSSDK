@@ -1,0 +1,4 @@
+base = """
+    DryRun = False,
+    LaunchTemplateName =
+"""
