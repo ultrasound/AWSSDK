@@ -36,5 +36,55 @@ REGIONS = [
     'cn-north-1',
 ]
 
-
+template_data = {
+    "EbsOptimized": False,
+    "BlockDeviceMappings": [
+        {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+                "DeleteOnTermination": True,
+                "SnapshotId": "snap-0f728a67a25236be2",
+                "VolumeSize": 10,
+                "VolumeType": "gp2"
+            }
+        }
+    ],
+    "NetworkInterfaces": [
+        {
+            "AssociatePublicIpAddress": True,
+            "DeleteOnTermination": True,
+            "Description": "Primary network interface",
+            "DeviceIndex": 0,
+            "Groups": [
+                "sg-0ba0c2220b4bbdaa4"
+            ],
+            "Ipv6Addresses": [],
+            "PrivateIpAddresses": [
+                {
+                    "Primary": True
+                }
+            ],
+            "SubnetId": "subnet-bd0c23d5"
+        }
+    ],
+    "ImageId": "ami-0e0f4ff1154834540",
+    "InstanceType": "t2.micro",
+    "KeyName": "ubuntu",
+    "Monitoring": {
+        "Enabled": False
+    },
+    "Placement": {
+        "AvailabilityZone": "ap-northeast-2a",
+        "GroupName": "",
+        "Tenancy": "default"
+    },
+    'DisableApiTermination': False,
+    'InstanceInitiatedShutdownBehavior': 'stop',
+    "CreditSpecification": {
+        "CpuCredits": "standard"
+    },
+    "CapacityReservationSpecification": {
+        "CapacityReservationPreference": "open"
+    }
+}
 

@@ -12,7 +12,7 @@ def datetime_to_str(data):
         return data.__str__()
 
 
-class Ec2Operation:
+class EC2Operation:
     def __init__(self):
         self._instance_ids = ''
 
@@ -25,6 +25,11 @@ class Ec2Operation:
         self._instance_ids = instance_ids
 
     def start_instances(self):
+        """
+        Starts an Amazon EBS-backed instance that you've previously stopped.
+
+        :return:
+        """
         try:
             ec2.start_instances(InstanceIds=[self._instance_ids], DryRun=True)
         except ClientError as e:
@@ -42,6 +47,10 @@ class Ec2Operation:
             print(e)
 
     def stop_instances(self):
+        """
+        Stops an Amazon EBS-backed instance.
+        :return:
+        """
         # Do a dryrun first to verify permissions
         try:
             ec2.stop_instances(InstanceIds=[self._instance_ids], DryRun=True)
@@ -76,7 +85,36 @@ class Ec2Operation:
         except ClientError as e:
             print('Error', e)
 
+    def terminate_instances(self):
+        """
+        Shuts down one or more instances.
+
+        :return:
+        """
+        try:
+            ec2.terminate_instances(InstanceIds=[self.instance_ids], DryRun=True)
+        except ClientError as e:
+            if 'DryRunOperation' not in str(e):
+                print("You don't have permission to terminate instances.")
+                raise
+
+        try:
+            ec2.terminate_instances(InstanceIds=[self.instance_ids], DryRun=False)
+            print("Instance ", self.instance_ids, ": terminating")
+            waiter = ec2.get_waiter('instance_terminated')
+            waiter.wait(InstanceIds=[self.instance_ids])
+            print("Instance ", self.instance_ids, ": terminated\n")
+        except ClientError as e:
+            print('Error', e)
+
     def desc_instances(self, save_to_file=False, all_instance=False):
+        """
+        Describes one or more of your instances.
+
+        :param save_to_file:
+        :param all_instance:
+        :return:
+        """
         if all_instance:
             res = ec2.describe_instances()
             print(json.dumps(res, default=datetime_to_str, indent=4))
@@ -98,8 +136,120 @@ class Ec2Operation:
         except ClientError as e:
             print(e)
 
-    def run_instance(self):
-        pass
+
+class LaunchEC2:
+    def run_instance(self, max_cnt=1, min_cnt=1, template_name=''):
+        try:
+            ec2.run_instances(
+                MaxCount=max_cnt,
+                MinCount=min_cnt,
+                DryRun=True,
+                LaunchTemplate={
+                    'LaunchTemplateName': template_name
+                }
+            )
+        except ClientError as e:
+            if 'DryRunOperation' not in str(e):
+                print("You don't have permission to launch instances.")
+                raise
+
+        try:
+            response = ec2.run_instances(
+                MaxCount=max_cnt,
+                MinCount=min_cnt,
+                DryRun=True,
+                LaunchTemplate={
+                    'LaunchTemplateName': template_name
+                }
+            )
+
+            ins_id = response.get('Instances')[0].get('InstanceId')
+            public_dns_name = response.get('Instances')[0].get('PublicDnsName')
+            public_ip_address = response.get('Instances')[0].get('PublicIpAddress')
+            key_name = response.get('Instances')[0].get('KeyName')
+
+            json.dump(response, open(ins_id + ".json", 'w'), default=datetime_to_str, indent=4)
+
+            print(f'Instance ID: {ins_id}\n'
+                  f'Public DNS Name: {public_dns_name}\n'
+                  f'Public IP Address: {public_ip_address}\n'
+                  f'Key Name: {key_name}\n')
+        except ClientError as e:
+            print(e)
+
+
+class Templates:
+    def create_launch_template(self, template_name='', version_description=None, template_data={}):
+        try:
+            ec2.create_launch_template(
+                DryRun=True,
+                LaunchTemplateName=template_name,
+                VersionDescription=version_description,
+                LaunchTemplateData=template_data
+            )
+        except ClientError as e:
+            if 'DryRunOperation' not in str(e):
+                print("You don't have permission to create template.")
+                raise
+
+        try:
+            response = ec2.create_launch_template(
+                DryRun=False,
+                LaunchTemplateName=template_name,
+                VersionDescription=version_description,
+                LaunchTemplateData=template_data
+            )
+
+            template_id = response.get('LaunchTemplate').get('LaunchTemplateId')
+
+            print(f'Template ID: {template_id}\nTemplate Name: {template_name}\n')
+        except ClientError as e:
+            print(e)
+
+    def delete_launch_template(self, template_name=''):
+        try:
+            ec2.delete_launch_template(
+                DryRun=True,
+                LaunchTemplateName=template_name
+            )
+        except ClientError as e:
+            if 'DryRunOperation' not in str(e):
+                print("You don't have permission to delete template.")
+                raise
+
+        try:
+            ec2.delete_launch_template(
+                DryRun=False,
+                LaunchTemplateName=template_name
+            )
+
+            print(template_name, " - deleted")
+        except ClientError as e:
+            print(e)
+
+    def describe_launch_templates(self, template_name=None, template_id=None):
+        if template_id is not None:
+            response = ec2.describe_launch_templates(
+                DryRun=False,
+                LaunchTemplateIds=template_id
+            )
+        elif template_name is not None:
+            response = ec2.describe_launch_templates(
+                DryRun=False,
+                LaunchTemplateNames=template_name,
+            )
+        else:
+            response = ec2.describe_launch_templates(DryRun=False)
+
+        return response
+
+    def get_launch_template_data(self, InstanceId=''):
+        response = ec2.get_launch_template_data(
+            DryRun=False,
+            InstanceId=InstanceId
+        )
+
+        return response
 
 
 if __name__ == '__main__':
@@ -110,7 +260,7 @@ if __name__ == '__main__':
         instance_id = reservation.get('Instances')[0].get('InstanceId')
         instanceId_list.append(instance_id)
 
-    ec2_ = Ec2Operation()
+    ec2_ = EC2Operation()
 
     while True:
         print("Instances List")
